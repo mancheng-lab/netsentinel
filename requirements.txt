@@ -1,0 +1,9 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+
+# 可选：解析他人提供的 XML 时启用，防御 XXE / billion laughs
+defusedxml==0.7.1
+
+# 可选：需要导出 PDF 报告时启用
+# reportlab==4.2.5

@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NetSentinel · 资产测绘与漏洞关联</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d;
+    --text: #e6edf3; --dim: #8b949e; --accent: #58a6ff;
+    --crit: #f85149; --high: #ff7b72; --med: #d29922; --low: #3fb950; --info: #8b949e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text); font: 14px/1.6 "Segoe UI", "Microsoft YaHei", sans-serif;
+    padding: 24px; max-width: 1400px; margin: 0 auto;
+  }
+  h1 { font-size: 22px; font-weight: 600; letter-spacing: .5px; }
+  h1 span { color: var(--accent); }
+  .sub { color: var(--dim); font-size: 13px; margin-top: 4px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 18px; margin-top: 18px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  input, select, button {
+    background: #0d1117; color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 9px 12px; font-size: 14px; font-family: inherit;
+  }
+  input { flex: 1; min-width: 220px; }
+  button { background: var(--accent); color: #0d1117; font-weight: 600; cursor: pointer; border: none; }
+  button:hover { opacity: .85; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-ghost { background: transparent; color: var(--text); border: 1px solid var(--border); font-weight: 400; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 16px; }
+  .card { background: #0d1117; border: 1px solid var(--border); border-radius: 6px; padding: 14px; }
+  .card .n { font-size: 26px; font-weight: 700; }
+  .card .l { color: var(--dim); font-size: 12px; margin-top: 2px; }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+  th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+  th { color: var(--dim); font-weight: 500; font-size: 12px; }
+  tr:hover td { background: #1c2128; }
+
+  .chip { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .CRITICAL { background: rgba(248,81,73,.18); color: var(--crit); }
+  .HIGH     { background: rgba(255,123,114,.18); color: var(--high); }
+  .MEDIUM   { background: rgba(210,153,34,.18); color: var(--med); }
+  .LOW      { background: rgba(63,185,80,.18); color: var(--low); }
+  .INFO     { background: rgba(139,148,158,.18); color: var(--info); }
+
+  .host { border: 1px solid var(--border); border-radius: 6px; margin-top: 12px; overflow: hidden; }
+  .host-hd { background: #1c2128; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+  .host-hd .addr { font-weight: 600; font-family: Consolas, monospace; }
+  .host-hd .meta { color: var(--dim); font-size: 12px; }
+  .host-bd { padding: 4px 14px 14px; }
+  .host-bd.hidden { display: none; }
+
+  .finding { border-left: 3px solid var(--border); padding: 6px 0 6px 12px; margin: 8px 0; font-size: 13px; }
+  .finding.CRITICAL, .finding.HIGH { border-left-color: var(--crit); }
+  .finding.MEDIUM { border-left-color: var(--med); }
+  .finding .t { font-weight: 600; }
+  .finding .d { color: var(--dim); font-size: 12px; }
+
+  .mono { font-family: Consolas, monospace; font-size: 12px; color: var(--dim); }
+  .warn { background: rgba(210,153,34,.12); border: 1px solid var(--med); border-radius: 6px; padding: 10px 14px; margin-top: 14px; font-size: 13px; }
+  .ok   { background: rgba(63,185,80,.10); border: 1px solid rgba(63,185,80,.4); border-radius: 6px; padding: 10px 14px; margin-top: 14px; font-size: 13px; }
+  #status { color: var(--accent); font-size: 13px; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<h1>Net<span>Sentinel</span></h1>
+<div class="sub">资产测绘 · 服务指纹 · CVE 关联 · 时序变更追踪</div>
+
+<!-- 环境自检 -->
+<div class="panel">
+  <strong>环境自检</strong>
+  <div id="preflight" class="mono" style="margin-top:8px">加载中…</div>
+</div>
+
+<!-- 扫描面板 -->
+<div class="panel">
+  <strong>发起扫描</strong>
+  <div class="row" style="margin-top:10px">
+    <input id="target" placeholder="目标，如 192.168.1.0/24 或 127.0.0.1" value="127.0.0.1">
+    <select id="profile"></select>
+    <button id="btn-scan" onclick="startScan()">开始扫描</button>
+    <button class="btn-ghost" onclick="loadScans()">刷新历史</button>
+  </div>
+  <div id="status"></div>
+  <div id="hint"></div>
+</div>
+
+<!-- 统计 -->
+<div class="cards" id="cards" style="display:none">
+  <div class="card"><div class="n" id="c-hosts">0</div><div class="l">存活主机</div></div>
+  <div class="card"><div class="n" id="c-ports">0</div><div class="l">开放端口</div></div>
+  <div class="card"><div class="n" id="c-find">0</div><div class="l">风险项</div></div>
+  <div class="card"><div class="n" id="c-crit">0</div><div class="l">严重主机</div></div>
+  <div class="card"><div class="n" id="c-dur">0s</div><div class="l">耗时</div></div>
+</div>
+
+<!-- 结果 -->
+<div class="panel" id="result-panel" style="display:none">
+  <strong>扫描结果</strong>
+  <div id="results"></div>
+</div>
+
+<!-- 历史 -->
+<div class="panel">
+  <strong>历史扫描</strong>
+  <div class="row" style="margin-top:10px">
+    <button class="btn-ghost" onclick="diffSelected()">对比选中的两次</button>
+    <span class="mono">勾选两条记录后可对比资产变更</span>
+  </div>
+  <table id="history"><thead><tr>
+    <th style="width:40px"></th><th>ID</th><th>目标</th><th>档位</th><th>时间</th><th>主机</th><th>端口</th><th>风险项</th>
+  </tr></thead><tbody></tbody></table>
+  <div id="diff-out"></div>
+</div>
+
+<div class="panel">
+  <div class="warn"><strong>授权声明：</strong>本工具仅限用于你拥有或已获得明确书面授权的网络环境。未经授权扫描他人网络可能违反当地法律法规。</div>
+</div>
+
+<script>
+const API = location.origin;
+let profiles = {};
+
+async function init() {
+  const r = await fetch(`${API}/api/preflight`).then(x => x.json());
+  profiles = r.profiles;
+  const sel = document.getElementById('profile');
+  sel.innerHTML = Object.entries(profiles)
+    .map(([k, v]) => `<option value="${k}">${v.label} — ${v.desc}</option>`).join('');
+  sel.value = 'service';
+
+  document.getElementById('preflight').innerHTML =
+    `平台：${r.platform}<br>Nmap：${r.nmap_version}<br>` +
+    `路径：${r.nmap_path || '未找到'}<br>` +
+    `管理员权限：<b style="color:${r.admin ? '#3fb950' : '#d29922'}">${r.admin ? '是（可执行 SYN/OS 扫描）' : '否（仅 TCP connect 扫描）'}</b><br>` +
+    `公网扫描：<b style="color:${r.allow_public ? '#f85149' : '#3fb950'}">${r.allow_public ? '已开启' : '已禁用（安全默认）'}</b>`;
+
+  if (!r.nmap_ok) {
+    document.getElementById('hint').innerHTML =
+      `<div class="warn" style="margin-top:10px">未检测到 Nmap，请先安装（Windows 需勾选 Npcap），或在环境变量中设置 NMAP_PATH。</div>`;
+  }
+  loadScans();
+}
+
+async function startScan() {
+  const target = document.getElementById('target').value.trim();
+  const profile = document.getElementById('profile').value;
+  const btn = document.getElementById('btn-scan');
+  const st = document.getElementById('status');
+  if (!target) { alert('请填写目标'); return; }
+
+  btn.disabled = true; btn.textContent = '扫描中…';
+  st.textContent = `正在扫描 ${target}（${profiles[profile].label}），请耐心等待…`;
+
+  try {
+    const res = await fetch(`${API}/api/scan`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({target, profile})
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || '扫描失败');
+    st.textContent = `完成，耗时 ${data.duration}s · ${data.stderr ? 'nmap stderr: ' + data.stderr.slice(0,200) : ''}`;
+    renderReport(data.report, data.duration);
+    loadScans();
+  } catch (e) {
+    st.innerHTML = `<span style="color:#f85149">${e.message}</span>`;
+  } finally {
+    btn.disabled = false; btn.textContent = '开始扫描';
+  }
+}
+
+function renderReport(rep, dur) {
+  const s = rep.summary || {};
+  document.getElementById('cards').style.display = 'grid';
+  document.getElementById('c-hosts').textContent = s.up || 0;
+  document.getElementById('c-ports').textContent = s.open_ports || 0;
+  document.getElementById('c-find').textContent = s.findings || 0;
+  document.getElementById('c-crit').textContent = s.critical_hosts || 0;
+  document.getElementById('c-dur').textContent = (dur || 0) + 's';
+
+  const box = document.getElementById('results');
+  if (!rep.hosts || !rep.hosts.length) { box.innerHTML = '<div class="mono">未发现存活主机</div>'; return; }
+
+  box.innerHTML = rep.hosts.map((h, i) => `
+    <div class="host">
+      <div class="host-hd" onclick="document.getElementById('hb${i}').classList.toggle('hidden')">
+        <div>
+          <span class="addr">${h.address}</span>
+          <span class="meta">${h.hostname ? '· ' + h.hostname : ''} ${h.os ? '· ' + h.os : ''} · ${h.ports.length} 个开放端口</span>
+        </div>
+        <span class="chip ${h.risk_level}">${h.risk_level} ${h.risk_score}</span>
+      </div>
+      <div class="host-bd" id="hb${i}">
+        <table>
+          <thead><tr><th>端口</th><th>服务</th><th>产品 / 版本</th><th>状态</th><th>风险</th></tr></thead>
+          <tbody>
+          ${h.ports.map(p => `
+            <tr>
+              <td class="mono">${p.port}/${p.protocol}</td>
+              <td>${p.service || '-'}</td>
+              <td class="mono">${[p.product, p.version].filter(Boolean).join(' ') || '-'}</td>
+              <td>${p.state}</td>
+              <td><span class="chip ${p.risk_level}">${p.risk_level}</span></td>
+            </tr>
+            ${p.findings.length ? `<tr><td colspan="5" style="padding-top:0;border-bottom:none">
+              ${p.findings.map(f => `<div class="finding ${f.level}">
+                <span class="chip ${f.level}">${f.level}</span>
+                <span class="t">${f.title}</span>
+                <div class="d">${f.advice}</div></div>`).join('')}
+            </td></tr>` : ''}
+          `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`).join('');
+  document.getElementById('result-panel').style.display = 'block';
+}
+
+async function loadScans() {
+  const rows = await fetch(`${API}/api/scans`).then(x => x.json());
+  document.querySelector('#history tbody').innerHTML = rows.map(r => `
+    <tr>
+      <td><input type="checkbox" class="sel" value="${r.id}"></td>
+      <td>${r.id}</td><td class="mono">${r.target}</td><td>${r.options}</td>
+      <td class="mono">${r.started_at}</td><td>${r.hosts_up}</td><td>${r.open_ports}</td><td>${r.findings}</td>
+    </tr>`).join('') || '<tr><td colspan="8" class="mono">暂无记录</td></tr>';
+}
+
+async function diffSelected() {
+  const ids = [...document.querySelectorAll('.sel:checked')].map(x => +x.value);
+  if (ids.length !== 2) { alert('请勾选两条记录'); return; }
+  const [a, b] = ids.sort((x, y) => x - y);
+  const d = await fetch(`${API}/api/diff?a=${a}&b=${b}`).then(x => x.json());
+  const sec = (t, arr) => arr.length
+    ? `<div class="finding ${t === '新增' ? 'HIGH' : t === '关闭' ? 'LOW' : 'MEDIUM'}">
+         <span class="t">${t}端口（${arr.length}）</span>
+         <div class="d">${arr.map(x => `${x.address}:${x.port} ${x.service || ''} ${x.version || ''}`).join(' · ')}</div></div>`
+    : '';
+  document.getElementById('diff-out').innerHTML =
+    `<div style="margin-top:14px"><strong>Scan #${a} → #${b} 变更</strong>
+     ${sec('新增', d.added)}${sec('关闭', d.removed)}${sec('变更', d.changed.map(c => c.new))}
+     ${!d.added.length && !d.removed.length && !d.changed.length ? '<div class="mono">无变化</div>' : ''}</div>`;
+}
+
+init();
+</script>
+</body>
+</html>
